@@ -209,11 +209,15 @@ function copyPackageContents(sourceDir, targetDir, packageJson) {
 	}
 }
 
+// Windows: npm is a .cmd shim, which spawnSync only runs through the shell.
+const npmCommand = process.platform === "win32" ? "npm.cmd" : "npm";
+
 function run(command, args, cwd) {
 	const result = spawnSync(command, args, {
 		cwd,
 		stdio: "pipe",
 		encoding: "utf8",
+		shell: process.platform === "win32" && command.endsWith(".cmd"),
 	});
 
 	if (result.status !== 0) {
@@ -292,7 +296,7 @@ function main() {
 
 		copyPackageContents(packagePath(releasePackage.packageDir), stagingDir, packageJson);
 
-		const tarballName = run("npm", ["pack", stagingDir, "--pack-destination", artifactsDir, "--silent"], root)
+		const tarballName = run(npmCommand, ["pack", stagingDir, "--pack-destination", artifactsDir, "--silent"], root)
 			.split("\n")
 			.at(-1);
 		if (!tarballName) {
