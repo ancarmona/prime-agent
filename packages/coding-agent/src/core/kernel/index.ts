@@ -744,6 +744,8 @@ export class KernelManager {
 				// ipykernel's parent poller exits the kernel if this pid dies (covers SIGKILL of the owner).
 				env: { ...process.env, ...this.options.env, JPY_PARENT_PID: String(process.pid) },
 				stdio: ["ignore", "pipe", "pipe"],
+				// The daemon worker has no console: without this Windows opens one for the kernel.
+				windowsHide: true,
 			});
 			this.kernel = kernel;
 			if (kernel.pid !== undefined) recordOrphanProcessState(kernel.pid, true);
