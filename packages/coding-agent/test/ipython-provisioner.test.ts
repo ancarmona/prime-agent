@@ -7,6 +7,12 @@ import type { ExtensionContext } from "../src/core/extensions/types.js";
 import type { KernelBootstrapProgressHandler } from "../src/core/kernel/bootstrap.js";
 import { type ExecuteResult, KernelBusyAfterInterruptError, KernelManager } from "../src/core/kernel/index.js";
 import { createIpythonToolDefinition, IpythonKernelProvisioner } from "../src/core/tools/ipython.js";
+import { getShellConfig } from "../src/utils/shell.js";
+
+vi.mock("../src/utils/shell.js", async (importOriginal) => ({
+	...(await importOriginal<typeof import("../src/utils/shell.js")>()),
+	getShellConfig: vi.fn(() => ({ shell: "C:\\Program Files\\Git\\bin\\bash.exe", args: ["-c"] })),
+}));
 
 let tempDir = "";
 
@@ -262,6 +268,66 @@ describe("IpythonKernelProvisioner", () => {
 			"\n \r\n\t%%script /custom/bash\r\nexport TEST_PREFIX=1\necho body",
 			expect.objectContaining({ signal: undefined, onStream: expect.any(Function) }),
 		);
+	});
+
+	describe("bash cells on Windows", () => {
+		const originalPlatform = Object.getOwnPropertyDescriptor(process, "platform");
+		beforeEach(() => {
+			Object.defineProperty(process, "platform", { value: "win32", configurable: true });
+		});
+		afterEach(() => {
+			if (originalPlatform) Object.defineProperty(process, "platform", originalPlatform);
+		});
+
+		function bashCellTool(options: { shellPath?: string }): {
+			tool: ReturnType<typeof createIpythonToolDefinition>;
+			execute: ReturnType<typeof vi.fn<KernelManager["execute"]>>;
+		} {
+			const execute = vi.fn<KernelManager["execute"]>().mockResolvedValueOnce(okExecuteResult());
+			const manager = { execute } as unknown as KernelManager;
+			const provisioner = {
+				ensure: vi.fn(async () => manager),
+				kill: vi.fn(async () => {}),
+			} as unknown as IpythonKernelProvisioner;
+			return { tool: createIpythonToolDefinition(tempDir, { provisioner, ...options }), execute };
+		}
+
+		it("double-quotes a %%script shell path (IPython splits it with non-POSIX rules there)", async () => {
+			const { tool, execute } = bashCellTool({ shellPath: "C:\\Program Files\\Git\\bin\\bash.exe" });
+
+			await tool.execute("tool-call", { code: "%%bash\necho body" }, undefined, undefined, {} as ExtensionContext);
+
+			expect(execute).toHaveBeenCalledWith(
+				'%%script "C:\\Program Files\\Git\\bin\\bash.exe"\necho body',
+				expect.objectContaining({ signal: undefined, onStream: expect.any(Function) }),
+			);
+		});
+
+		it("routes a bare %%bash cell to the bash tool's shell when no shellPath is configured", async () => {
+			const { tool, execute } = bashCellTool({});
+
+			await tool.execute("tool-call", { code: "%%bash\necho body" }, undefined, undefined, {} as ExtensionContext);
+
+			expect(vi.mocked(getShellConfig)).toHaveBeenCalled();
+			expect(execute).toHaveBeenCalledWith(
+				'%%script "C:\\Program Files\\Git\\bin\\bash.exe"\necho body',
+				expect.objectContaining({ signal: undefined, onStream: expect.any(Function) }),
+			);
+		});
+
+		it("leaves %%bash cells that carry their own magic arguments alone", async () => {
+			const { tool, execute } = bashCellTool({});
+
+			await tool.execute(
+				"tool-call",
+				{ code: "%%bash --out x\necho body" },
+				undefined,
+				undefined,
+				{} as ExtensionContext,
+			);
+
+			expect(execute).toHaveBeenCalledWith("%%bash --out x\necho body", expect.anything());
+		});
 	});
 
 	it("lets the user wait when an interrupted kernel is still busy", async () => {

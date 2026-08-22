@@ -3,6 +3,7 @@ import type { AgentTool } from "@earendil-works/pi-agent-core";
 import type { ImageContent, TextContent } from "@earendil-works/pi-ai";
 import { type Static, Type } from "typebox";
 import { IMAGE_MIME_TYPES } from "../../utils/mime.js";
+import { getShellConfig } from "../../utils/shell.js";
 import type { ExtensionContext, ToolDefinition } from "../extensions/types.js";
 import { withKernelBootPermit } from "../kernel/boot-gate.js";
 import type { KernelBootstrapProgressHandler } from "../kernel/bootstrap.js";
@@ -298,7 +299,28 @@ export interface IpythonToolOptions {
 }
 
 function quoteScriptMagicArgument(value: string): string {
-	return /^[A-Za-z0-9_@%+=:,./-]+$/.test(value) ? value : `'${value.replace(/'/g, "'\"'\"'")}'`;
+	if (/^[A-Za-z0-9_@%+=:,./-]+$/.test(value)) return value;
+	if (process.platform === "win32") {
+		// IPython splits %%script arguments with posix=False on Windows (CommandLineToArgvW
+		// rules): single quotes are literal there, double quotes group; a backslash only
+		// escapes when it precedes a double quote or ends the string.
+		return `"${value.replace(/(\\*)"/g, '$1$1\\"').replace(/(\\+)$/, "$1$1")}"`;
+	}
+	return `'${value.replace(/'/g, "'\"'\"'")}'`;
+}
+
+/**
+ * On Windows a bare `%%bash` runs whatever `bash` is first on PATH — often WSL's
+ * `System32\bash.exe`, which sees neither the user's PATH nor node. Route it to the same
+ * Git Bash the bash tool resolves, unless the user configured a shellPath.
+ */
+function defaultBashMagicShellPath(): string | undefined {
+	if (process.platform !== "win32") return undefined;
+	try {
+		return getShellConfig().shell;
+	} catch {
+		return undefined;
+	}
 }
 
 function applyShellSettingsToBashMagicCell(
@@ -306,7 +328,7 @@ function applyShellSettingsToBashMagicCell(
 	options: Pick<IpythonToolOptions, "commandPrefix" | "shellPath"> | undefined,
 ): string {
 	const commandPrefix = options?.commandPrefix;
-	const shellPath = options?.shellPath?.trim();
+	const shellPath = options?.shellPath?.trim() || defaultBashMagicShellPath();
 	if (!commandPrefix && !shellPath) return code;
 
 	const bashCell = parseIpythonBashCell(code);
