@@ -1,3 +1,2 @@
 - Fixed the Python kernel bootstrap on Windows: the managed venv's interpreter is `Scripts\python.exe` there, not `bin/python`, so first-time setup failed at `uv pip install` and needed `PRIME_AGENT_KERNEL_PYTHON`.
-- Fixed bare `%%bash` cells on Windows running whatever `bash` is first on PATH (often WSL's `System32\bash.exe`): they now use the same Git Bash the bash tool resolves, and `%%script` shell paths are double-quoted there because IPython splits them with non-POSIX rules.
-- Fixed the IPython kernel and bash-tool processes opening a visible console window on Windows when started by the detached daemon worker (`windowsHide`).
+- Fixed the Python kernel, bootstrap checks, bash tool and orphan-reaper `taskkill` opening visible console windows on Windows when started by the detached daemon worker (`windowsHide`).
